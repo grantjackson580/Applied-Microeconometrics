@@ -1,0 +1,106 @@
+---
+title: "Homework 3"
+author: "Grant Jackson"
+date: "2024-09-15"
+output: pdf_document
+---
+
+## Theoretical Questions
+
+### Question 1
+
+i.  **In words, describe how to thin about p(2).**
+
+Think of p(2) as the expected home value for houses with 2 rooms in Massachusetts.
+
+ii. **Say you have a sample of parcels, how would you go about estimating p(n)? How would you estimate this in a regression?**
+
+I would sort the data into groups by the number of rooms and then calculate each groups average home value. To make the estimate in a regression, I would create dummy variables for each group of houses by room number and then run the regression equation including the dummy variable.
+
+iii. **How does the "fully-flexible" conditional expectation function differ from a linear regression model where Home Value_i = NumRooms_i x Beta + Ui**
+
+The "fully-flexible" conditional expectation function differs because it allows each number of rooms to have its own effect on home value, instead of assuming a constant change in home value for each additional room like in the linear model.
+
+iv. **Why might we not believe that p(3) - p(2) be the causal effect of increasing from 4 to 5 rooms on home price?**
+
+We might not believe this because of possible omitted variable bias like larger homes being built in better neighborhoods, or more valuable homes might have more additions built.
+
+### Question 2
+
+i.  **Say I include a set of indicator variables for gender and for whether or not the worker has a college degree in a regression. Describe a scenario where this regression model is not the conditional expectation function (hint: think about interactions).**
+
+Say the wage bonus for having a college degree differs between the two genders, then you will need to include an interaction term like Gender x CollegeDegree. If there is an interaction effect between gender and having a college degree or not on wages, this model wouldn't capture it.
+
+## Coding Exercise
+
+```{r setup, include=FALSE}
+library(arrow)    
+library(fixest)   
+library(binsreg)
+
+setwd("~/Applied Microeconometrics/Data")
+data <- read_parquet("MA_parcels_sample.parquet")
+names(data)
+```
+
+### Question 1
+
+Estimate the Conditional Expectation Function:
+
+```{r cond-exp-function}
+# Estimate the model
+model <- feols(total_value ~ 0 + i(n_rooms), data = data)
+
+# Get the predicted change from 4 to 5 rooms
+change_4_to_5 <- coef(model)["n_rooms::5"]
+
+print(change_4_to_5)
+   
+summary(model)
+```
+
+The predicted change from the conditional expectation function is $45,071.67.
+
+### Question 2
+
+Estimate a Linear Regression:
+
+```{r linear-regression}
+# Estimate linear model
+linear_model <- feols(total_value ~ n_rooms, data = data)
+
+# Get coefficient for n_rooms
+linear_change <- coef(linear_model)["n_rooms"]
+print(paste("Predicted change per room:", linear_change))
+
+# Calculate change from 4 to 5 rooms
+linear_change_4_to_5 <- linear_change
+print(paste("Predicted change from 4 to 5 rooms:", linear_change_4_to_5))
+
+print(paste("Difference from CEF estimate:", change_4_to_5 - linear_change_4_to_5))
+
+summary(linear_model)
+```
+
+The predicted change from the linear regression model is $9,333.63. The linear model has a much smaller value in the predicted in the change from 4 rooms to 5 rooms, with a difference of $35,738.03.
+
+### Question 3
+
+Use Binscatter:
+
+```{r binscatter}
+# Binscatter plots without covariate (simple scatter of total_value against lot_size_acres)
+binsreg_plot1 <- binsreg(y = data$total_value, x = data$lot_size_acres, w = data$lot_size_acres,
+                         line = c(0,0))
+
+binsreg_plot2 <- binsreg(y = data$total_value, x = data$lot_size_acres, w = data$lot_size_acres,
+                         line = c(2,2))
+                      
+binsreg_plot1
+binsreg_plot2
+
+```
+
+## Question 4
+
+This relationship is likely not causal due to several issues. It is likely the larger lots are in more desirable areas, more valuable properties might be more likely to have larger lots, and there could be selection bias in who is choosing to buy homes with different lot sizes.
