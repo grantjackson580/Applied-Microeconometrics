@@ -1,0 +1,157 @@
+---
+title: "Assignment 4"
+author: "Grant Jackson"
+date: "2024-10-02"
+output: pdf_document
+---
+
+# Theory Questions:
+
+## [Question 1:]{.underline}
+
+i: I would subset the data to have only 30 year old individuals, and then calculate the average outcomes for the treated group (Di = 1) and untreated group (Di = 0) from the subset. The difference between the average outcomes is the conditional average treatment effect for 30 year old individuals.
+
+ii: After conducting the same process described above for each age group (25-55 years old), I would calculate a weighted average of these conditional effects, with the weights being proportional to the number of individuals in each age group in the sample.
+
+## [Question 2:]{.underline}
+
+i: The conditional independence assumption likely will not hold in this case. While conditioning on a college degree could control for motivation, there are unobservable factors among individuals with college degrees that affect whether they take an online course or not. An individual's current employment status or job market conditions could affect both their decision to take an online coding class and potential outcomes (returns).
+
+ii: The conditional independence assumption likely will not hold in this case. An unobservable factor could influence where new apartments are built, such as neihborhoods with lower crime rates, which may not be fully represented by neihborhood income, could attract new apartments to be built and also independently affect home prices.
+
+iii: The conditional independence assumption likely is also violated in this case. Matching individuals on average weekly drinking may not control for all factors that home effect. Individuals who smoke may be more likely to have a poor diet or not exercise frequent, which affects later life health outcomes. This is not fully captured by alcohol consumption and would lead to biased estimates.
+
+# Coding Exercise:
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## [Loading packages and data:]{.underline}
+
+```{r data, include=FALSE}
+library(haven)
+library(MatchIt)
+library(WeightIt)
+library(fixest)
+library(cobalt)
+
+setwd("~/Applied Microeconometrics/Data")
+
+df <- haven::read_dta('almond_chay_lee.dta')
+```
+
+## [Question 1:]{.underline}
+
+#### Checking Initial Imbalance:
+
+```{r}
+# Creating dummy variable that is 1 if education is 12 years or more (HS Grad)
+df$m_hs_degree <- df$medu >= 12
+
+# No matching; constructing a pre-match matchit object
+m.out0 <- matchit(
+  mbsmoke ~ mage + m_hs_degree + mrace + fbaby, 
+  data = df, 
+  method = NULL, 
+  distance = "glm"
+)
+
+# Checking balance prior to matching
+summary(m.out0)
+```
+
+#### Matching:
+
+```{r}
+# 1:1 NN PS matching w/o replacement
+m.out1 <- matchit(
+  mbsmoke ~ mage + m_hs_degree + mrace + fbaby, 
+  data = df, 
+  method = "nearest", 
+  distance = "glm"
+)
+
+# Checking balance after matching
+summary(
+  m.out1, 
+  un = FALSE
+)
+```
+
+Interpretation: The initial imbalance results shows noticeable differences between mothers who smoked during pregnancy (treated group) and mothers who didn't smoke during pregnancy (untreated group). They also reveal strong evidence that smoking mothers are on average younger, less likely to complete highschool, while a mothers race or first born don't have a strong difference with smoking or not. The post matching balance results make all the standardized mean differences very close to zero, which effectively helps reduce bias in estimating the effect of smoking during pregnancy on birth weight.
+
+## [Question 2:]{.underline}
+
+```{r}
+# Nearest neighbor match for mage and medu exactly on mmarried, mhisp, and alcohol
+m.out3 <- matchit(
+  mbsmoke ~ medu + mage, 
+  data = df,
+  exact = ~ mmarried + mhisp + alcohol,
+  method = "nearest", distance = "mahalanobis"
+)
+
+# Getting matched dataset on matchit function results 
+matched_df <- match.data(m.out3)
+
+# Estimating difference-in-means estimator
+feols(
+  bweight ~ i(mbsmoke), 
+  data = matched_df, 
+  vcov = "HC1"
+)
+
+# sometimes people do this
+# feols(
+#   bweight ~ i(mbsmoke) + medu + mage, data = matched_df, vcov = "HC1"
+# )
+```
+
+Interpretation: The coefficient of -249.296 is the estimated average treatment effect of smoking during pregnancy on birth weight. In other words, through matching mothers who smoked during pregnancy with similar mothers who didn't smoke based on several covariates, its estimated that smoking during pregnancy reduces their birth weight by on average 249.3 grams. This is statistically significant with a p-value less than 2.2e-16.
+
+## [Question 3:]{.underline}
+
+```{r}
+# Regression adjustment 
+reg_adj <- lm(
+  bweight ~ mbsmoke + mmarried + mhisp + alcohol + mage + medu, 
+  data = df
+)
+
+# Displaying the results
+summary(reg_adj)
+```
+
+## [Question 4:]{.underline}
+
+#### Estimating propensity score and checking balance:
+
+```{r}
+# Estimate propensity scores and weights
+w_out <- weightit(
+  mbsmoke ~ mmarried + mhisp + alcohol + mage + medu,
+  data = df,
+  method = "ps",
+  estimand = "ATE"
+)
+
+# Checking the balance after weighting
+bal_tab <- bal.tab(w_out)
+print(bal_tab)
+```
+
+#### Estimating the IPTW estimator:
+
+```{r}
+# Estimate the IPTW estimator
+iptw_est <- feols(
+  bweight ~ mbsmoke,
+  data = df,
+  weights = w_out$weights,
+  vcov = "HC1"
+)
+summary(iptw_est)
+```
+
+Interpretation: The weighting generally improved balance across the covariates. This process reduces the effective sample size, especially in the treated group. The small difference in propensity score distance indicates the weighting has successfully balanced the overall probability of treatment assignment between groups.
