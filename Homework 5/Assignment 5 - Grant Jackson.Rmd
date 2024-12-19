@@ -1,0 +1,141 @@
+---
+title: "Assignment 5 - Grant Jackson"
+author: "Grant Jackson"
+date: "2024-11-04"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Theory Questions
+
+## [Question 1:]{.underline}
+
+**i:** The exclusion restriction might fail because being near a community college could affect wages directly rather than just through post-secondary education. Being near a community college may bring more employment opportunities, affecting wages directly. Areas with a community college could have better economic conditions or industries that affect wages directly.
+
+**ii:** The exclusion restriction might fail because implementing a school funding tax could signal other pre-existing factors that directly impact house prices. Communities that implement a school funding tax probably have wealthier residents who can afford the tax, and wealthier residents could impact higher house prices directly. These communities could also have greater community investment priority, making the area more appealing and directly raising house prices.
+
+**iii:** The exclusion restriction might fail because a parent's wealth likely drives other factors that directly impact a person's level of happiness. A parents wealth while raising a child could directly impact their level of happiness for their life. It could also affect the level of education, healthcare, and opportunities in childhood, which impacts their happiness.
+
+## [Question 2:]{.underline}
+
+Weak instruments mean that 'Zi' is weakly correlated with the endogenous 'Xi'. In the first stage, this leads to inaccurate Xi predictions. In the second stage, the inaccurate Xi's lead to non-normal sampling distribution of the 2SLS estimator. This should also bias the estimator towards the first stage OLS regression. All of these effects make it near impossible to make reliable statistical conclusions, even with large sample sizes.
+
+# Coding Exercise
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r data, include=FALSE}
+
+library(WeightIt)
+library(fixest)
+library(cobalt)
+
+setwd("~/Applied Microeconometrics/Data")
+
+data <- read.csv('gerber_et_al_2010.csv')
+
+
+```
+
+## [Question 1:]{.underline}
+
+```{r Question1}
+model <- feols(
+  pt_id_with_lean ~ treat,
+  data = data,
+  vcov = 'HC1'
+)
+etable(model, fitstat = c("n", "f"))
+```
+
+**Interpretation:** The F-statistic of 3.780 is concerning because it is below the rule of thumb of F\>10 for a strong instrument. This indicates we have a weak instrument.
+
+## [Question 2:]{.underline}
+
+```{r Question2}
+feols(
+  pt_voteevalalignindex ~ treat,
+  data = data,
+  vcov = 'HC1'
+)
+```
+
+**2SLS Calculation:**
+
+```{r 2SLSEstimator}
+s1_te <- 0.0795
+
+s2_te <- 0.279980
+
+estimator = s2_te / s1_te
+
+estimator
+```
+
+## [Question 3:]{.underline}
+
+```{r Question3}
+feols(
+  pt_voteevalalignindex ~ 1| pt_id_with_lean~treat,
+  data = data,
+  vcov = 'HC1'
+)
+summary(data$pt_voteevalalignindex)
+```
+
+**Interpretation:** The coefficient exactly matches our hand calculation. With the p-value\>0.10, this estimate is not statistically significant. This was expected given the weak results in the first stage.
+
+## [Question 4:]{.underline}
+
+```{r Question4}
+# Getting population means for comparison
+pop_means <- data.frame(
+  variable = c("age", "voted2006", "pt_church"),
+  pop_mean = c(
+    mean(data$age, na.rm = TRUE),
+    mean(data$voted2006, na.rm = TRUE),
+    mean(data$pt_church, na.rm = TRUE)
+  )
+)
+
+# Getting complier means for each characteristic
+# For age
+age_compliers <- feols(
+  I(pt_id_with_lean * age) ~ 1 | pt_id_with_lean ~ treat,
+  data = data,
+  vcov = 'HC1'
+)
+
+# For 2006 voting
+vote_compliers <- feols(
+  I(pt_id_with_lean * voted2006) ~ 1 | pt_id_with_lean ~ treat,
+  data = data,
+  vcov = 'HC1'
+)
+
+# For church attendance
+church_compliers <- feols(
+  I(pt_id_with_lean * pt_church) ~ 1 | pt_id_with_lean ~ treat,
+  data = data,
+  vcov = 'HC1'
+)
+
+# Comparing complier means to population means
+results <- data.frame(
+  variable = c("age", "voted2006", "pt_church"),
+  complier_mean = c(
+    coef(age_compliers)[1],
+    coef(vote_compliers)[1],
+    coef(church_compliers)[1]
+  )
+)
+
+# Merging with population means
+comparison <- merge(pop_means, results, by = "variable")
+print(comparison)
+```
+
+**Interpretation:** The compiler means indicate that those who respond to the treatment by registering are systematically different from the average voter by being younger, less religious, and less politically engaged in the past. IT is safe to assume the effectiveness of the treatment might vary substantially across different demographic groups. We should not generalize our LATE estimate to the broader population.
