@@ -1,4 +1,4 @@
-# Applied-Microeconometrics-
+# Applied-Microeconometrics
 Assignments completed using R-Markdown for Applied Microeconometrics course during my masters program
 
 Total of 6 assignments involving various methods used to establish causal inference:
