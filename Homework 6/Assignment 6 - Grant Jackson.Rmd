@@ -1,0 +1,240 @@
+---
+title: "Assignment 6"
+author: "Grant Jackson"
+date: "2024-11-18"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(fixest)
+library(DRDID)
+```
+
+```{r load data}
+setwd("~/Applied Microeconometrics/Data")
+
+tva <- read_csv('tva.csv')
+```
+
+## Question 1: Different DiD Estimation Methods
+
+```{r creating short data}
+tva_short <- tva |> 
+  filter(year == 1940 | year == 1960)
+
+tva_short
+```
+
+### Method 1
+
+```{r did-manual}
+ybar_treat_post <- tva |>
+  filter(year == 1960 & tva == 1) |> 
+  pull(ln_manufacturing) |> mean()
+
+ybar_treat_pre <- tva |>
+  filter(year == 1940 & tva == 1) |>
+  pull(ln_manufacturing) |> mean()
+
+ybar_control_post <- tva |>
+  filter(year == 1960 & tva == 0) |> 
+  pull(ln_manufacturing) |> mean()
+
+ybar_control_pre <- tva |>
+  filter(year == 1940 & tva == 0) |>
+  pull(ln_manufacturing) |> mean()
+
+did_manual <- (ybar_treat_post - ybar_treat_pre) - (ybar_control_post - ybar_control_pre)
+
+print(paste("Manual DiD Estimate:", did_manual))
+```
+
+### Method 2
+
+```{r did-regression}
+reg_did <- feols(
+  ln_manufacturing ~
+    i(tva, year == 1960, ref = 0) | county_code + year,
+  data = tva_short, vcov = "hc1"
+)
+    
+
+print(reg_did)
+```
+
+### Method 3
+
+```{r did-firstdiff}
+first_diff <- tva_short |>
+  mutate(
+    .by = county_code,
+    delta_ln_manufacturing =
+      ln_manufacturing[year == 1960] -
+      ln_manufacturing[year == 1940]
+  ) |>
+  filter(year == 1960)
+
+did_fd <- feols(
+  delta_ln_manufacturing ~ i(tva, ref = 0),
+  data = first_diff,
+  vcov = 'hc1'
+)
+
+print(did_fd)
+```
+
+We can verify that the methods all produce the same estimate.
+
+## Question 2: Requirements for Causual Interpretation
+
+Key assumptions needed for causal interpretation of these estimates are:
+
+1.  Parallel Trends Assumption = Treated and control counties would have followed the same trend in the absence of the treatment(tva)
+
+2.  No Spillover Effects = TVA treatment didn't affect manufacutring employment in control counties
+
+3.  No Anticipation Effects = Behavior of counties didn't change before treatment because of anticiaption of TVA
+
+4.  Stable Unit Treatment Assumption = Each country's outcomes only depends on its own treatment status
+
+## Question 3: Pre-trends and 1950 Estimates
+
+```{r pretrends}
+calc_did <- function(start_year, end_year) {
+  temp_data <- tva |>
+    filter(year %in% c(start_year, end_year)) |>
+    mutate(
+      .by = county_code,
+      delta_ln_manufacturing = 
+        ln_manufacturing[year == end_year] -
+        ln_manufacturing[year == start_year]
+    ) |>
+    filter(year == end_year)
+  
+  model <- feols(
+    delta_ln_manufacturing ~ i(tva, ref = 0),
+    data = temp_data,
+    vcov = "HC1"
+  )
+  
+  return(model)
+}
+
+did_1920 <- calc_did(1940, 1920) # pre-trend
+did_1930 <- calc_did(1940, 1930) # pre-trend
+did_1950 <- calc_did(1940, 1950)
+
+print("Pre-trend 1920-1940:")
+print(did_1920)
+print("Pre-trend 1930-1940:")
+print(did_1930)
+print("Effect 1940-1950:")
+print(did_1950)
+```
+
+## Question 4: Event Study
+
+```{r event-study}
+tva_event <- tva |>
+  mutate(
+    event_time = if_else(
+      tva == 0,
+      -10,  # for untreated group
+      year - 1950  # for treated group
+    )
+  )
+
+event_study <- feols(
+  ln_manufacturing ~
+    i(tva, i.event_time, ref = 0, ref2 = -10) |
+    county_code + year,
+  data = tva_event,
+  vcov = 'hc1'
+)
+
+print(event_study)
+```
+
+We can verify the methods from questions 3 and 4 produce the same results.
+
+## Conditional Parallel Trends
+
+## Question 1: Argument for Including Baseline Manufacturing Share
+
+Including baseline manufacturing share as co-variate is important because:
+
+1.  Captures pre-existing industrial development
+2.  Areas with different initial manufacturing levels could have different growth movement
+3.  Helps control for mean reversion in manufacturing employment
+4.  Accounts for potential convergence patterns in regional development
+
+## Question 2: Regression Adjustment Estimator
+
+```{r reg-adjustment}
+covariates <- c(
+  "agriculture_share_1920", "agriculture_share_1930",
+  "manufacturing_share_1920", "manufacturing_share_1930",
+  "white_share_1920", "white_share_1930"
+)
+
+reg_adj <- feols(
+  delta_ln_manufacturing ~ i(tva, ref = 0) + 
+    agriculture_share_1920 + agriculture_share_1930 +
+    manufacturing_share_1920 + manufacturing_share_1930 +
+    white_share_1920 + white_share_1930,
+  data = first_diff
+)
+
+etable(reg_adj)
+```
+
+## Question 3: DRDID Panel Regression
+
+```{r drdid_panel}
+drdid_data <- tva_short |>
+  arrange(county_code, year)
+
+y1 <- drdid_data$ln_manufacturing[drdid_data$year == 1960]
+y0 <- drdid_data$ln_manufacturing[drdid_data$year == 1940]
+D <- drdid_data$tva[drdid_data$year == 1960]
+covariates <- as.matrix(drdid_data[drdid_data$year == 1960, 
+                                   c("agriculture_share_1920", 
+                                     "agriculture_share_1930", 
+                                     "manufacturing_share_1920", 
+                                     "manufacturing_share_1930", 
+                                     "white_share_1920", 
+                                     "white_share_1930")])
+
+covariates <- cbind(1, covariates)
+
+drdid_panel <- DRDID::reg_did_panel(
+  y1 = y1,
+  y0 = y0,
+  D = D,
+  covariates = covariates,
+  boot = TRUE,            # Use bootstrap for inference (optional)
+  nboot = 999             # Number of bootstrap repetitions
+)
+
+summary(drdid_panel)
+```
+
+## Question 4: Doubly-robust Estimator
+
+```{r drdid robust}
+# Perform Doubly-Robust DiD
+drdid_results <- DRDID::drdid_panel(
+  y1 = y1,
+  y0 = y0,
+  D = D,
+  covariates = covariates,
+  boot = TRUE,    # Bootstrap for inference
+  nboot = 999     # Number of bootstrap repetitions
+)
+
+summary(drdid_results)
+```
